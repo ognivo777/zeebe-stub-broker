@@ -1,16 +1,33 @@
 package org.obiz;
 
-import jakarta.ws.rs.GET;
-import jakarta.ws.rs.Path;
-import jakarta.ws.rs.Produces;
+import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import org.obiz.entity.JobRequest;
 
-@Path("/hello")
+@Path("/payload")
 public class ExampleResource {
 
-    @GET
+    @Inject
+    JobsQueue queue;
+
+//    @Inject
+//    @Channel("jobs-out")
+//    Emitter<JobRequest> emitter;
+//
+//    @Inject
+//    @Any
+//    InMemoryConnector connector;
+
+    @Path("{worker}")
+    @PUT
     @Produces(MediaType.TEXT_PLAIN)
-    public String hello() {
-        return "Hello from Quarkus REST";
+    public String putPayload(@PathParam("worker") String worker, @QueryParam("repeatCount") @DefaultValue("1") int repeatCount, String payload) throws InterruptedException {
+
+        JobRequest jobRequest = new JobRequest(worker, payload, repeatCount);
+//        connector.source(worker).send(jobRequest);
+//        emitter.send(jobRequest);
+        queue.enqueue(jobRequest);
+        return "%s: %d : %s".formatted(worker, repeatCount, payload);
     }
 }

@@ -1,112 +1,129 @@
 package org.obiz;
 
-import io.camunda.zeebe.gateway.protocol.Gateway;
-import io.smallrye.mutiny.Multi;
+import com.google.common.util.concurrent.AtomicDouble;
+import io.camunda.zeebe.gateway.protocol.GatewayGrpc;
+import io.camunda.zeebe.gateway.protocol.GatewayOuterClass;
+import io.grpc.stub.StreamObserver;
+import io.micrometer.core.annotation.Counted;
+import io.quarkus.grpc.GrpcService;
 import io.smallrye.mutiny.Uni;
+import jakarta.inject.Inject;
 
-public class ZeebeGatewayStub implements Gateway {
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
+
+@GrpcService
+public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
+
+//    @Inject
+//    @Any
+//    InMemoryConnector connector;
+
+    @Inject
+    JobsQueue queue;
+
+    private AtomicLong jobKeySequence = new AtomicLong();
+    private AtomicLong counter = new AtomicLong();
+    private final double ALPHA = 0.2;
+    private final AtomicDouble rps = new AtomicDouble(0.0);
+    private final AtomicLong prevTime = new AtomicLong(System.nanoTime());
+    Lock lock = new ReentrantLock();
+
+
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CancelProcessInstanceResponse> cancelProcessInstance(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CancelProcessInstanceRequest request) {
-        return null;
+    @Counted(value = "counted.activateJobs")
+    public void activateJobs(GatewayOuterClass.ActivateJobsRequest request, StreamObserver<GatewayOuterClass.ActivateJobsResponse> responseObserver) {
+
+        String worker = request.getType();
+        int maxJobsToActivate = request.getMaxJobsToActivate();
+        long requestTimeout = request.getRequestTimeout();
+        System.out.printf("Job request worker = %s (maxJobsToActivate: %s; requestTimeout: %d )%n", worker, maxJobsToActivate, requestTimeout);
+
+        lock.lock();
+        long currentTimeNanos = System.nanoTime();
+        long elapsedTimeNanos = currentTimeNanos - prevTime.get();
+
+        if(elapsedTimeNanos>0) {
+            double instantRps = 1000000000.0 / elapsedTimeNanos;
+            rps.set(ALPHA * instantRps + (1 - ALPHA) * rps.doubleValue());
+        }
+        prevTime.set(currentTimeNanos);
+        lock.unlock();
+
+        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(worker, maxJobsToActivate)
+                .map(jobRequest -> GatewayOuterClass.ActivatedJob.newBuilder()
+                    .setType(jobRequest.getWorker())
+                    .setKey(jobKeySequence.incrementAndGet())
+                    .setVariables(jobRequest.getVariablesJson())
+                    .build())
+                .toList();
+
+        responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder()
+                        .addAllJobs(jobs)
+                .build());
+
+        if(!jobs.isEmpty()) {
+            responseObserver.onCompleted();
+        } else {
+            Uni.createFrom().emitter(emitter -> {
+                emitter.complete("");
+            }).onItem().delayIt().by(Duration.ofMillis(requestTimeout)).subscribe().with(o -> {
+                responseObserver.onCompleted();
+                System.out.println("completed");
+            });
+        }
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CompleteJobResponse> completeJob(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CompleteJobRequest request) {
-        return null;
+    public void streamActivatedJobs(GatewayOuterClass.StreamActivatedJobsRequest request, StreamObserver<GatewayOuterClass.ActivatedJob> responseObserver) {
+        super.streamActivatedJobs(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CreateProcessInstanceResponse> createProcessInstance(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CreateProcessInstanceRequest request) {
-        return null;
+    public void completeJob(GatewayOuterClass.CompleteJobRequest request, StreamObserver<GatewayOuterClass.CompleteJobResponse> responseObserver) {
+        long jobKey = request.getJobKey();
+        String variables = request.getVariables();
+        System.out.println("Completed job: " + jobKey + " with variables: " + variables);
+        responseObserver.onNext(GatewayOuterClass.CompleteJobResponse.newBuilder().build());
+        responseObserver.onCompleted();
+//        super.completeJob(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CreateProcessInstanceWithResultResponse> createProcessInstanceWithResult(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.CreateProcessInstanceWithResultRequest request) {
-        return null;
+    public void throwError(GatewayOuterClass.ThrowErrorRequest request, StreamObserver<GatewayOuterClass.ThrowErrorResponse> responseObserver) {
+        super.throwError(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.EvaluateDecisionResponse> evaluateDecision(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.EvaluateDecisionRequest request) {
-        return null;
+    public void failJob(GatewayOuterClass.FailJobRequest request, StreamObserver<GatewayOuterClass.FailJobResponse> responseObserver) {
+        super.failJob(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeployProcessResponse> deployProcess(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeployProcessRequest request) {
-        return null;
+    public void setVariables(GatewayOuterClass.SetVariablesRequest request, StreamObserver<GatewayOuterClass.SetVariablesResponse> responseObserver) {
+        super.setVariables(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeployResourceResponse> deployResource(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeployResourceRequest request) {
-        return null;
+    public void topology(GatewayOuterClass.TopologyRequest request, StreamObserver<GatewayOuterClass.TopologyResponse> responseObserver) {
+        super.topology(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.FailJobResponse> failJob(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.FailJobRequest request) {
-        return null;
+    public void updateJobRetries(GatewayOuterClass.UpdateJobRetriesRequest request, StreamObserver<GatewayOuterClass.UpdateJobRetriesResponse> responseObserver) {
+        super.updateJobRetries(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ThrowErrorResponse> throwError(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ThrowErrorRequest request) {
-        return null;
+    public void updateJobTimeout(GatewayOuterClass.UpdateJobTimeoutRequest request, StreamObserver<GatewayOuterClass.UpdateJobTimeoutResponse> responseObserver) {
+        super.updateJobTimeout(request, responseObserver);
     }
 
     @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.PublishMessageResponse> publishMessage(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.PublishMessageRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ResolveIncidentResponse> resolveIncident(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ResolveIncidentRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.SetVariablesResponse> setVariables(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.SetVariablesRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.TopologyResponse> topology(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.TopologyRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobRetriesResponse> updateJobRetries(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobRetriesRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ModifyProcessInstanceResponse> modifyProcessInstance(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ModifyProcessInstanceRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.MigrateProcessInstanceResponse> migrateProcessInstance(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.MigrateProcessInstanceRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobTimeoutResponse> updateJobTimeout(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.UpdateJobTimeoutRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeleteResourceResponse> deleteResource(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.DeleteResourceRequest request) {
-        return null;
-    }
-
-    @Override
-    public Uni<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.BroadcastSignalResponse> broadcastSignal(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.BroadcastSignalRequest request) {
-        return null;
-    }
-
-    @Override
-    public Multi<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ActivateJobsResponse> activateJobs(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ActivateJobsRequest request) {
-        return null;
-    }
-
-    @Override
-    public Multi<io.camunda.zeebe.gateway.protocol.GatewayOuterClass.ActivatedJob> streamActivatedJobs(io.camunda.zeebe.gateway.protocol.GatewayOuterClass.StreamActivatedJobsRequest request) {
-        return null;
+    public void broadcastSignal(GatewayOuterClass.BroadcastSignalRequest request, StreamObserver<GatewayOuterClass.BroadcastSignalResponse> responseObserver) {
+        super.broadcastSignal(request, responseObserver);
     }
 }
