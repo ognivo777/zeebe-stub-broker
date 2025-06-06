@@ -6,11 +6,12 @@ import io.camunda.zeebe.gateway.protocol.GatewayOuterClass;
 import io.grpc.stub.StreamObserver;
 import io.micrometer.core.annotation.Counted;
 import io.quarkus.grpc.GrpcService;
-import io.smallrye.mutiny.Uni;
+import io.vertx.core.Vertx;
+import io.vertx.core.eventbus.EventBus;
 import jakarta.inject.Inject;
 
 import java.time.Duration;
-import java.util.List;
+import java.time.temporal.ChronoUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
@@ -24,6 +25,12 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
 
     @Inject
     JobsQueue queue;
+
+    @Inject
+    EventBus eventBus;
+
+    @Inject
+    Vertx vertx;
 
     private AtomicLong jobKeySequence = new AtomicLong();
     private AtomicLong counter = new AtomicLong();
@@ -42,6 +49,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
         long requestTimeout = request.getRequestTimeout();
         System.out.printf("Job request worker = %s (maxJobsToActivate: %s; requestTimeout: %d )%n", worker, maxJobsToActivate, requestTimeout);
 
+        //Dirty sliding RPS calculation
         lock.lock();
         long currentTimeNanos = System.nanoTime();
         long elapsedTimeNanos = currentTimeNanos - prevTime.get();
@@ -53,28 +61,39 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
         prevTime.set(currentTimeNanos);
         lock.unlock();
 
-        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(worker, maxJobsToActivate)
-                .map(jobRequest -> GatewayOuterClass.ActivatedJob.newBuilder()
-                    .setType(jobRequest.getWorker())
-                    .setKey(jobKeySequence.incrementAndGet())
-                    .setVariables(jobRequest.getVariablesJson())
-                    .build())
-                .toList();
+        queue.jobStream(worker, maxJobsToActivate, Duration.of(requestTimeout, ChronoUnit.MILLIS), jobRequest -> {
+            responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder().addJobs(
+                    GatewayOuterClass.ActivatedJob.newBuilder()
+                            .setType(jobRequest.getWorker())
+                            .setKey(jobKeySequence.incrementAndGet())
+                            .setVariables(jobRequest.getVariablesJson())
+                            .build()
+            ).build());
+        }, responseObserver::onCompleted);
 
-        responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder()
-                        .addAllJobs(jobs)
-                .build());
 
-        if(!jobs.isEmpty()) {
-            responseObserver.onCompleted();
-        } else {
-            Uni.createFrom().emitter(emitter -> {
-                emitter.complete("");
-            }).onItem().delayIt().by(Duration.ofMillis(requestTimeout)).subscribe().with(o -> {
-                responseObserver.onCompleted();
-                System.out.println("completed");
-            });
-        }
+//        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(worker, maxJobsToActivate)
+//                .map(jobRequest -> GatewayOuterClass.ActivatedJob.newBuilder()
+//                    .setType(jobRequest.getWorker())
+//                    .setKey(jobKeySequence.incrementAndGet())
+//                    .setVariables(jobRequest.getVariablesJson())
+//                    .build())
+//                .toList();
+//
+//        responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder()
+//                        .addAllJobs(jobs)
+//                .build());
+//
+//        if(!jobs.isEmpty()) {
+//            responseObserver.onCompleted();
+//        } else {
+//            Uni.createFrom().emitter(emitter -> {
+//                emitter.complete("");
+//            }).onItem().delayIt().by(Duration.ofMillis(requestTimeout)).subscribe().with(o -> {
+//                responseObserver.onCompleted();
+//                System.out.println("completed");
+//            });
+//        }
     }
 
     @Override

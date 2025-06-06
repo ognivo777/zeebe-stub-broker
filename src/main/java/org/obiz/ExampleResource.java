@@ -27,7 +27,9 @@ public class ExampleResource {
         JobRequest jobRequest = new JobRequest(worker, payload, repeatCount);
 //        connector.source(worker).send(jobRequest);
 //        emitter.send(jobRequest);
-        queue.enqueue(jobRequest);
-        return "%s: %d : %s".formatted(worker, repeatCount, payload);
+        if(queue.enqueue(jobRequest))
+            return "%s: %d : %s".formatted(worker, repeatCount, payload);
+        else
+            return "No space for store: %s: %d : %s".formatted(worker, repeatCount, payload);
     }
 }
