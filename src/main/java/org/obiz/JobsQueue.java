@@ -6,12 +6,15 @@ import io.smallrye.mutiny.subscription.MultiEmitter;
 import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.obiz.entity.EnqueResult;
 import org.obiz.entity.JobRequest;
 
 import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -20,89 +23,95 @@ import java.util.stream.Stream;
 @ApplicationScoped
 public class JobsQueue {
 
-    // Named in-memory queues
-    private ConcurrentMap<String, BlockingQueue<JobRequest>> jobsStore = new ConcurrentHashMap<>();
-    // Named emitter trigger (one per worker)
-    private final Map<String, List<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();
-
-    private Lock triggerLock = new ReentrantLock();
-    private Random random = new Random();
-    private int bufferSize = 5;
+    private final Lock triggerLock = new ReentrantLock();
+    private final int bufferSize = 5;
 
     @Inject
     Vertx vertx;
 
-    public boolean enqueue(JobRequest jobRequest) {
-        if (emitters.containsKey(jobRequest.getWorker())) {
-            triggerLock.lock();
-            var workerEmitters = emitters.get(jobRequest.getWorker());
-            int size = workerEmitters.size();
-            if (size > 0) {
-                int index = random.nextInt(size);
-                MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.remove(index);
-                multiEmitter.emit(jobRequest);
+    // Named per worker in-memory job queues
+    private ConcurrentMap<String, BlockingQueue<JobRequest>> jobsStore = new ConcurrentHashMap<>();
+    // Named per worker emitters list
+    private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();
+
+    public EnqueResult enqueue(JobRequest jobRequest) {
+        BlockingQueue<JobRequest> queue = getQueue(jobRequest.getWorker());
+        var workerEmitters = emitters.get(jobRequest.getWorker());
+        if (workerEmitters!=null) {
+            triggerLock.lock(); //todo use per-emmiters lock
+            try {
+                MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
+                if (multiEmitter != null) {
+                    multiEmitter.emit(jobRequest);
+                    return new EnqueResult(true, false, queue.remainingCapacity(), jobRequest);
+                }
+            } finally {
                 triggerLock.unlock();
-                return true;
             }
-            triggerLock.unlock();
+
         }
-        return getQueue(jobRequest.getWorker()).offer(jobRequest);
-    }
-
-    public JobRequest dequeue(String worker) throws InterruptedException {
-        return getQueue(worker).take();
-    }
-
-    private BlockingQueue<JobRequest> getQueue(String worker) {
-        return jobsStore.computeIfAbsent(worker, s -> new LinkedBlockingQueue<>(bufferSize));
+        if(queue.offer(jobRequest)){
+            return new EnqueResult(true, true, queue.remainingCapacity(), jobRequest);
+        } else {
+            return new EnqueResult(false, false, queue.remainingCapacity(), jobRequest);
+        }
     }
 
     /**
      * Reactive job stream (up to maxCount or until timeout)
      */
     public void jobStream(String worker, int maxCount, Duration timeout, Consumer<JobRequest> jobRequestConsumer, Runnable onFinish) {
+        //Consume available requests in queue up to maxCount
         var queue = getQueue(worker);
         AtomicInteger count = new AtomicInteger();
-        //send available requests
-        while (count.get() < maxCount) {
+        do {
             var jobRequest = queue.poll();
-            if (jobRequest == null) break;
-            count.incrementAndGet();
-            jobRequestConsumer.accept(jobRequest);
-        }
+            if (jobRequest == null)
+                break;
+            else
+                jobRequestConsumer.accept(jobRequest);
+        } while (count.incrementAndGet() < maxCount);
+
         if (count.get() > 0) {
             onFinish.run();
         } else {
-
+            AtomicLong timerId = new AtomicLong();
             Multi.createFrom().<JobRequest>emitter(emitter -> {
-                        emitters.computeIfAbsent(worker, s -> Collections.synchronizedList(new ArrayList<>())).add(emitter);
-//            vertx.setTimer(timeout.toMillis(), l -> {
-//                emitters.get(worker).remove(emitter);
-//                emitter.complete();
-//                onFinish.run();
-//            });
+                        var multiEmitters = emitters.computeIfAbsent(worker, s -> new ConcurrentLinkedQueue<>());
+                        multiEmitters.add(emitter);
+                        timerId.set(vertx.setTimer(timeout.toMillis(), event -> {
+                            triggerLock.lock(); //todo use per-emmiters lock
+                            try {
+                                multiEmitters.remove(emitter);
+                                onFinish.run();
+                            } finally {
+                                triggerLock.unlock();
+                            }
+                        }));
                     })
                     .select().first()
-                    .ifNoItem().after(timeout).fail()
+//                    .ifNoItem().after(timeout).fail()
                     .subscribe()
                     .with(jobRequest -> {
+                        vertx.cancelTimer(timerId.get());
                         if (jobRequest == null) {
                             // TODO never should happen!
                             System.out.println("Happened something wrong!");
                         } else {
-                            jobRequestConsumer.accept(jobRequest);
-                            onFinish.run();
+                            try {
+                                jobRequestConsumer.accept(jobRequest);
+                                onFinish.run();
+                            } catch (io.grpc.StatusRuntimeException e) {
+                                enqueue(jobRequest);
+                            }
                         }
-                    }, e-> onFinish.run());
-
+                    }, e-> {
+                        onFinish.run();
+                    });
         }
-
     }
 
-    public Stream<JobRequest> jobStream(String worker, int count) {
-//        queue.poll(11, TimeUnit.MINUTES);
-        ArrayList<JobRequest> jobs = new ArrayList<>();
-        getQueue(worker).drainTo(jobs, count);
-        return jobs.stream();
+    private BlockingQueue<JobRequest> getQueue(String worker) {
+        return jobsStore.computeIfAbsent(worker, s -> new LinkedBlockingQueue<>(bufferSize));
     }
 }

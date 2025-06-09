@@ -32,8 +32,6 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
     @Inject
     Vertx vertx;
 
-    private AtomicLong jobKeySequence = new AtomicLong();
-    private AtomicLong counter = new AtomicLong();
     private final double ALPHA = 0.2;
     private final AtomicDouble rps = new AtomicDouble(0.0);
     private final AtomicLong prevTime = new AtomicLong(System.nanoTime());
@@ -44,10 +42,11 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
     @Counted(value = "counted.activateJobs")
     public void activateJobs(GatewayOuterClass.ActivateJobsRequest request, StreamObserver<GatewayOuterClass.ActivateJobsResponse> responseObserver) {
 
-        String worker = request.getType();
+        String workerType = request.getType();
+        String worker = request.getWorker();
         int maxJobsToActivate = request.getMaxJobsToActivate();
         long requestTimeout = request.getRequestTimeout();
-        System.out.printf("Job request worker = %s (maxJobsToActivate: %s; requestTimeout: %d )%n", worker, maxJobsToActivate, requestTimeout);
+        System.out.printf("Job request workerType = %s (%s) (maxJobsToActivate: %s; requestTimeout: %d )%n", workerType, worker, maxJobsToActivate, requestTimeout);
 
         //Dirty sliding RPS calculation
         lock.lock();
@@ -61,18 +60,18 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
         prevTime.set(currentTimeNanos);
         lock.unlock();
 
-        queue.jobStream(worker, maxJobsToActivate, Duration.of(requestTimeout, ChronoUnit.MILLIS), jobRequest -> {
+        queue.jobStream(workerType, maxJobsToActivate, Duration.of(requestTimeout, ChronoUnit.MILLIS), jobRequest -> {
             responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder().addJobs(
                     GatewayOuterClass.ActivatedJob.newBuilder()
                             .setType(jobRequest.getWorker())
-                            .setKey(jobKeySequence.incrementAndGet())
+                            .setKey(jobRequest.getNumber())
                             .setVariables(jobRequest.getVariablesJson())
                             .build()
             ).build());
         }, responseObserver::onCompleted);
 
 
-//        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(worker, maxJobsToActivate)
+//        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(workerType, maxJobsToActivate)
 //                .map(jobRequest -> GatewayOuterClass.ActivatedJob.newBuilder()
 //                    .setType(jobRequest.getWorker())
 //                    .setKey(jobKeySequence.incrementAndGet())
