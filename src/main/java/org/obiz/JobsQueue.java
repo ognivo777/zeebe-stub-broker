@@ -1,16 +1,17 @@
 package org.obiz;
 
-import io.quarkus.micrometer.runtime.binder.websockets.WebSocketMetricsInterceptorProducerImpl;
+import io.quarkus.logging.Log;
 import io.smallrye.mutiny.Multi;
 import io.smallrye.mutiny.subscription.MultiEmitter;
+import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.obiz.entity.EnqueResult;
 import org.obiz.entity.JobRequest;
+import org.obiz.entity.JobResult;
 
 import java.time.Duration;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -18,13 +19,12 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
-import java.util.stream.Stream;
 
 @ApplicationScoped
 public class JobsQueue {
 
     private final Lock triggerLock = new ReentrantLock();
-    private final int bufferSize = 5;
+    private final int bufferSize = 500;
 
     @Inject
     Vertx vertx;
@@ -33,6 +33,7 @@ public class JobsQueue {
     private ConcurrentMap<String, BlockingQueue<JobRequest>> jobsStore = new ConcurrentHashMap<>();
     // Named per worker emitters list
     private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();
+    private final Map<Long, UniEmitter<? super JobResult>> responseEmitters = new ConcurrentHashMap<>();
 
     public EnqueResult enqueue(JobRequest jobRequest) {
         BlockingQueue<JobRequest> queue = getQueue(jobRequest.getWorker());
@@ -48,7 +49,6 @@ public class JobsQueue {
             } finally {
                 triggerLock.unlock();
             }
-
         }
         if(queue.offer(jobRequest)){
             return new EnqueResult(true, true, queue.remainingCapacity(), jobRequest);
@@ -106,6 +106,8 @@ public class JobsQueue {
                             }
                         }
                     }, e-> {
+                        Log.error("Error on waiting jobs", e);
+                        vertx.cancelTimer(timerId.get());
                         onFinish.run();
                     });
         }
@@ -113,5 +115,17 @@ public class JobsQueue {
 
     private BlockingQueue<JobRequest> getQueue(String worker) {
         return jobsStore.computeIfAbsent(worker, s -> new LinkedBlockingQueue<>(bufferSize));
+    }
+
+    public void addResponseEmitterForJob(JobRequest jobRequest, UniEmitter<? super JobResult> uniEmitter) {
+        //todo add wait timeout and emit "no response"
+        responseEmitters.put(jobRequest.getNumber(), uniEmitter);
+    }
+
+    public void sendResponse(long jobKey, String variables) {
+        UniEmitter<? super JobResult> emitter = responseEmitters.remove(jobKey);
+        if(emitter!=null) {
+            emitter.complete(new JobResult(jobKey, variables));
+        }
     }
 }

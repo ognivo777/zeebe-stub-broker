@@ -5,7 +5,9 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
+import org.obiz.entity.EnqueResult;
 import org.obiz.entity.JobRequest;
+import org.obiz.entity.JobResult;
 
 @Path("/payload")
 public class AddWorkService {
@@ -16,8 +18,17 @@ public class AddWorkService {
     @Path("{worker}")
     @PUT
     @Produces(MediaType.APPLICATION_JSON)
-    public Uni<String> putPayload(@PathParam("worker") String worker, @QueryParam("repeatCount") @DefaultValue("1") int repeatCount, String payload) throws InterruptedException {
+    public Uni<String> putPayload(
+            @PathParam("worker") String worker,
+            @QueryParam("repeatCount") @DefaultValue("1") int repeatCount,
+            @QueryParam("async") @DefaultValue("true") boolean isAsync, String payload) {
         JobRequest jobRequest = new JobRequest(worker, payload, repeatCount);
-        return Uni.createFrom().item(JSON.toJSONString(queue.enqueue(jobRequest)));
+        EnqueResult enqueResult = queue.enqueue(jobRequest);
+        if (!isAsync && enqueResult.isSuccess()) {
+            return Uni.createFrom().<JobResult>emitter(uniEmitter -> {
+                queue.addResponseEmitterForJob(jobRequest, uniEmitter);
+            }).map(JSON::toJSONString);
+        }
+        return Uni.createFrom().item(JSON.toJSONString(enqueResult));
     }
 }

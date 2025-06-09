@@ -105,6 +105,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
         long jobKey = request.getJobKey();
         String variables = request.getVariables();
         System.out.println("Completed job: " + jobKey + " with variables: " + variables);
+        queue.sendResponse(jobKey, variables);
         responseObserver.onNext(GatewayOuterClass.CompleteJobResponse.newBuilder().build());
         responseObserver.onCompleted();
 //        super.completeJob(request, responseObserver);
