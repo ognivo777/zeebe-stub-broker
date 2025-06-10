@@ -19,6 +19,13 @@ Built using [Quarkus](https://quarkus.io/performance/) for high performance and 
 * Provides real-time job submission status and queue info.
 
 # 🚀 Usage
+
+## Run broker stub
+Pick `*.jar` from last release and run with java:
+```shell
+java -jar broker-stub-to-run-workers-1.0-SNAPSHOT-runner.jar
+```
+
 ## Submit Job via REST
 **Endpoint:**
 `PUT http://localhost:8080/payload/{worker-name}`
