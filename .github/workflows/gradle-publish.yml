@@ -29,3 +29,11 @@ jobs:
           native-image --version
       - name: Example step using Gradle plugin # https://graalvm.github.io/native-build-tools/latest/gradle-plugin.html
         run: ./gradlew quarkusBuild
+      - name: Upload binaries to release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: build/quarkus-build/gen/*.jar
+          asset_name: broker-stub-to-run-workers-1.0-SNAPSHOT-runner.jar
+          tag: ${{ github.ref }}
+          overwrite: true          
