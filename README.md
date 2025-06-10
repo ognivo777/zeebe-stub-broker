@@ -1,74 +1,71 @@
-# brocker-stub-to-run-workers
+# zeebe-stub-broker
 
-This project uses Quarkus, the Supersonic Subatomic Java Framework.
+**zeebe-stub-broker** is a lightweight emulator of a [Zeebe broker](https://docs.camunda.io/docs/components/zeebe/zeebe-overview/),
+designed for testing and validating [Zeebe workers](https://docs.camunda.io/docs/components/concepts/job-workers/). 
+It enables easy functional verification of new workers and supports load testing to evaluate performance under stress.
 
-If you want to learn more about Quarkus, please visit its website: <https://quarkus.io/>.
+Built using [Quarkus](https://quarkus.io/performance/) for high performance and responsiveness.
 
-## Running the application in dev mode
+# 🧪 Use Cases
+* ⚙️ Quick validation of newly developed Zeebe workers.
+* 🔄 Performance and high load testing of worker throughput.
+* 🧰 Local development tool for simulating Zeebe job dispatching.
 
-You can run your application in dev mode that enables live coding using:
+# 🔧 Features
+* Accepts jobs via a simple REST API.
+* Asynchronously delivers jobs to registered Zeebe workers.
+* Queues jobs if the worker is busy (with configurable limits).
+* Optional synchronous mode to get immediate worker responses.
+* Provides real-time job submission status and queue info.
 
-```shell script
-./gradlew quarkusDev
+# 🚀 Usage
+## Submit Job via REST
+**Endpoint:**
+`PUT http://localhost:8080/payload/{worker-name}`
+
+**Body:**
+JSON containing the Zeebe context variables.
+
+**Example Request:**
+```http
+PUT /payload/my-worker HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
+
+{
+  "someVar": "some value"
+}
 ```
 
-> **_NOTE:_**  Quarkus now ships with a Dev UI, which is available in dev mode only at <http://localhost:8080/q/dev/>.
-
-## Packaging and running the application
-
-The application can be packaged using:
-
-```shell script
-./gradlew build
+*Example Response (Async mode, default):*
+```json
+{
+  "jobRequest": {
+    "number": 135574,
+    "variablesJson": "{\"someVar\":\"some value\"}",
+    "worker": "my-worker"
+  },
+  "queued": false,
+  "spaceLeft": 500,
+  "success": true
+}
 ```
 
-It produces the `quarkus-run.jar` file in the `build/quarkus-app/` directory.
-Be aware that it’s not an _über-jar_ as the dependencies are copied into the `build/quarkus-app/lib/` directory.
+### Synchronous Response Mode
+You can use `?async=false` to wait for the worker to complete and return its response immediately:
+```http
+PUT /payload/my-worker?async=false HTTP/1.1
+Host: localhost:8080
+Content-Type: application/json
 
-The application is now runnable using `java -jar build/quarkus-app/quarkus-run.jar`.
-
-If you want to build an _über-jar_, execute the following command:
-
-```shell script
-./gradlew build -Dquarkus.package.jar.type=uber-jar
+{
+  "someVar": "some value"
+}
 ```
 
-The application, packaged as an _über-jar_, is now runnable using `java -jar build/*-runner.jar`.
-
-## Creating a native executable
-
-You can create a native executable using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true
+```json
+{
+  "jobKey": 135575,
+  "variables": "{\"Message\":\"Fast worker response!\"}"
+}
 ```
-
-Or, if you don't have GraalVM installed, you can run the native executable build in a container using:
-
-```shell script
-./gradlew build -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true
-```
-
-You can then execute your native executable with: `./build/brocker-stub-to-run-workers-1.0-SNAPSHOT-runner`
-
-If you want to learn more about building native executables, please consult <https://quarkus.io/guides/gradle-tooling>.
-
-## Related Guides
-
-- REST ([guide](https://quarkus.io/guides/rest)): A Jakarta REST implementation utilizing build time processing and
-  Vert.x. This extension is not compatible with the quarkus-resteasy extension, or any of the extensions that depend on
-  it.
-
-## Provided Code
-
-### gRPC
-
-Create your first gRPC service
-
-[Related guide section...](https://quarkus.io/guides/grpc-getting-started)
-
-### REST
-
-Easily start your REST Web Services
-
-[Related guide section...](https://quarkus.io/guides/getting-started-reactive#reactive-jax-rs-resources)
