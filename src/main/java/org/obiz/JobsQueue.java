@@ -23,7 +23,8 @@ import java.util.function.Consumer;
 @ApplicationScoped
 public class JobsQueue {
 
-    private final Lock triggerLock = new ReentrantLock();
+    private final Lock emitterLock = new ReentrantLock();
+    private final Lock lock = new ReentrantLock();
     private final int bufferSize = 500;
 
     @Inject
@@ -32,35 +33,42 @@ public class JobsQueue {
     // Named per worker in-memory job queues
     private ConcurrentMap<String, BlockingQueue<JobRequest>> jobsStore = new ConcurrentHashMap<>();
     // Named per worker emitters list
-    private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();
+    private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();//ToDo use UniEmitter
     private final Map<Long, UniEmitter<? super JobResult>> responseEmitters = new ConcurrentHashMap<>();
 
     public EnqueResult enqueue(JobRequest jobRequest) {
         BlockingQueue<JobRequest> queue = getQueue(jobRequest.getWorker());
-        var workerEmitters = emitters.get(jobRequest.getWorker());
-        if (workerEmitters!=null) {
-            triggerLock.lock(); //todo use per-emmiters lock
-            try {
-                MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
-                if (multiEmitter != null) {
-                    multiEmitter.emit(jobRequest);
-                    return new EnqueResult(true, false, queue.remainingCapacity(), jobRequest);
+        lock.lock();
+        try {
+            var workerEmitters = emitters.get(jobRequest.getWorker());
+            if (workerEmitters!=null) {
+                emitterLock.lock(); //todo use per-emmiters / lock
+                try {
+                    MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
+                    if (multiEmitter != null) {
+                        multiEmitter.emit(jobRequest);
+                        return new EnqueResult(true, false, queue.remainingCapacity(), jobRequest);
+                    }
+                } finally {
+                    emitterLock.unlock();
                 }
-            } finally {
-                triggerLock.unlock();
             }
+            if(queue.offer(jobRequest)){
+                return new EnqueResult(true, true, queue.remainingCapacity(), jobRequest);
+            } else {
+                return new EnqueResult(false, false, queue.remainingCapacity(), jobRequest);
+            }
+        } finally {
+            lock.unlock();
         }
-        if(queue.offer(jobRequest)){
-            return new EnqueResult(true, true, queue.remainingCapacity(), jobRequest);
-        } else {
-            return new EnqueResult(false, false, queue.remainingCapacity(), jobRequest);
-        }
+
     }
 
     /**
      * Reactive job stream (up to maxCount or until timeout)
      */
     public void jobStream(String worker, int maxCount, Duration timeout, Consumer<JobRequest> jobRequestConsumer, Runnable onFinish) {
+        lock.lock();
         //Consume available requests in queue up to maxCount
         var queue = getQueue(worker);
         AtomicInteger count = new AtomicInteger();
@@ -74,18 +82,20 @@ public class JobsQueue {
 
         if (count.get() > 0) {
             onFinish.run();
+            lock.unlock();
         } else {
             AtomicLong timerId = new AtomicLong();
             Multi.createFrom().<JobRequest>emitter(emitter -> {
                         var multiEmitters = emitters.computeIfAbsent(worker, s -> new ConcurrentLinkedQueue<>());
                         multiEmitters.add(emitter);
+                        lock.unlock();
                         timerId.set(vertx.setTimer(timeout.toMillis(), event -> {
-                            triggerLock.lock(); //todo use per-emmiters lock
+                            emitterLock.lock(); //todo use per-emmiters lock
                             try {
-                                multiEmitters.remove(emitter);
-                                onFinish.run();
+                                if(multiEmitters.remove(emitter))
+                                    onFinish.run();
                             } finally {
-                                triggerLock.unlock();
+                                emitterLock.unlock();
                             }
                         }));
                     })
@@ -102,6 +112,7 @@ public class JobsQueue {
                                 jobRequestConsumer.accept(jobRequest);
                                 onFinish.run();
                             } catch (io.grpc.StatusRuntimeException e) {
+                                //worker disconnected
                                 enqueue(jobRequest);
                             }
                         }

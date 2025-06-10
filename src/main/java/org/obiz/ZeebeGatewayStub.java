@@ -46,7 +46,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
         String worker = request.getWorker();
         int maxJobsToActivate = request.getMaxJobsToActivate();
         long requestTimeout = request.getRequestTimeout();
-        System.out.printf("Job request workerType = %s (%s) (maxJobsToActivate: %s; requestTimeout: %d )%n", workerType, worker, maxJobsToActivate, requestTimeout);
+//        System.out.printf("Job request workerType = %s (%s) (maxJobsToActivate: %s; requestTimeout: %d )%n", workerType, worker, maxJobsToActivate, requestTimeout);
 
         //Dirty sliding RPS calculation
         lock.lock();
@@ -104,7 +104,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
     public void completeJob(GatewayOuterClass.CompleteJobRequest request, StreamObserver<GatewayOuterClass.CompleteJobResponse> responseObserver) {
         long jobKey = request.getJobKey();
         String variables = request.getVariables();
-        System.out.println("Completed job: " + jobKey + " with variables: " + variables);
+//        System.out.println("Completed job: " + jobKey + " with variables: " + variables);
         queue.sendResponse(jobKey, variables);
         responseObserver.onNext(GatewayOuterClass.CompleteJobResponse.newBuilder().build());
         responseObserver.onCompleted();
