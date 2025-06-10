@@ -8,4 +8,4 @@ pluginManagement {
         id "${quarkusPluginId}" version "${quarkusPluginVersion}"
     }
 }
-rootProject.name = 'brocker-stub-to-run-workers'
+rootProject.name = 'broker-stub-to-run-workers'

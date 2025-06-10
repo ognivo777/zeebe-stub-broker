@@ -7,7 +7,7 @@ import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.obiz.entity.EnqueResult;
+import org.obiz.entity.EnqueueResult;
 import org.obiz.entity.JobRequest;
 import org.obiz.entity.JobResult;
 
@@ -36,7 +36,7 @@ public class JobsQueue {
     private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();//ToDo use UniEmitter
     private final Map<Long, UniEmitter<? super JobResult>> responseEmitters = new ConcurrentHashMap<>();
 
-    public EnqueResult enqueue(JobRequest jobRequest) {
+    public EnqueueResult enqueue(JobRequest jobRequest) {
         BlockingQueue<JobRequest> queue = getQueue(jobRequest.getWorker());
         lock.lock();
         try {
@@ -47,16 +47,16 @@ public class JobsQueue {
                     MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
                     if (multiEmitter != null) {
                         multiEmitter.emit(jobRequest);
-                        return new EnqueResult(true, false, queue.remainingCapacity(), jobRequest);
+                        return new EnqueueResult(true, false, queue.remainingCapacity(), jobRequest);
                     }
                 } finally {
                     emitterLock.unlock();
                 }
             }
             if(queue.offer(jobRequest)){
-                return new EnqueResult(true, true, queue.remainingCapacity(), jobRequest);
+                return new EnqueueResult(true, true, queue.remainingCapacity(), jobRequest);
             } else {
-                return new EnqueResult(false, false, queue.remainingCapacity(), jobRequest);
+                return new EnqueueResult(false, false, queue.remainingCapacity(), jobRequest);
             }
         } finally {
             lock.unlock();

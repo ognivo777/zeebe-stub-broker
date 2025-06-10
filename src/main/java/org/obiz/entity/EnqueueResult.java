@@ -1,12 +1,12 @@
 package org.obiz.entity;
 
-public class EnqueResult {
+public class EnqueueResult {
     private boolean success;
     private boolean queued;
     private int spaceLeft;
     private JobRequest jobRequest;
 
-    public EnqueResult(boolean success, boolean queued, int spaceLeft, JobRequest jobRequest) {
+    public EnqueueResult(boolean success, boolean queued, int spaceLeft, JobRequest jobRequest) {
         this.success = success;
         this.queued = queued;
         this.spaceLeft = spaceLeft;

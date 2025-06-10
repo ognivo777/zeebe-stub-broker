@@ -6,8 +6,6 @@ import io.camunda.zeebe.gateway.protocol.GatewayOuterClass;
 import io.grpc.stub.StreamObserver;
 import io.micrometer.core.annotation.Counted;
 import io.quarkus.grpc.GrpcService;
-import io.vertx.core.Vertx;
-import io.vertx.core.eventbus.EventBus;
 import jakarta.inject.Inject;
 
 import java.time.Duration;
@@ -19,18 +17,8 @@ import java.util.concurrent.locks.ReentrantLock;
 @GrpcService
 public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
 
-//    @Inject
-//    @Any
-//    InMemoryConnector connector;
-
     @Inject
     JobsQueue queue;
-
-    @Inject
-    EventBus eventBus;
-
-    @Inject
-    Vertx vertx;
 
     private final double ALPHA = 0.2;
     private final AtomicDouble rps = new AtomicDouble(0.0);
@@ -69,30 +57,6 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
                             .build()
             ).build());
         }, responseObserver::onCompleted);
-
-
-//        List<GatewayOuterClass.ActivatedJob> jobs = queue.jobStream(workerType, maxJobsToActivate)
-//                .map(jobRequest -> GatewayOuterClass.ActivatedJob.newBuilder()
-//                    .setType(jobRequest.getWorker())
-//                    .setKey(jobKeySequence.incrementAndGet())
-//                    .setVariables(jobRequest.getVariablesJson())
-//                    .build())
-//                .toList();
-//
-//        responseObserver.onNext(GatewayOuterClass.ActivateJobsResponse.newBuilder()
-//                        .addAllJobs(jobs)
-//                .build());
-//
-//        if(!jobs.isEmpty()) {
-//            responseObserver.onCompleted();
-//        } else {
-//            Uni.createFrom().emitter(emitter -> {
-//                emitter.complete("");
-//            }).onItem().delayIt().by(Duration.ofMillis(requestTimeout)).subscribe().with(o -> {
-//                responseObserver.onCompleted();
-//                System.out.println("completed");
-//            });
-//        }
     }
 
     @Override
@@ -101,6 +65,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
     }
 
     @Override
+    @Counted(value = "counted.completedJobs")
     public void completeJob(GatewayOuterClass.CompleteJobRequest request, StreamObserver<GatewayOuterClass.CompleteJobResponse> responseObserver) {
         long jobKey = request.getJobKey();
         String variables = request.getVariables();

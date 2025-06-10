@@ -5,7 +5,7 @@ import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.MediaType;
-import org.obiz.entity.EnqueResult;
+import org.obiz.entity.EnqueueResult;
 import org.obiz.entity.JobRequest;
 import org.obiz.entity.JobResult;
 
@@ -20,15 +20,14 @@ public class AddWorkService {
     @Produces(MediaType.APPLICATION_JSON)
     public Uni<String> putPayload(
             @PathParam("worker") String worker,
-            @QueryParam("repeatCount") @DefaultValue("1") int repeatCount,
             @QueryParam("async") @DefaultValue("true") boolean isAsync, String payload) {
-        JobRequest jobRequest = new JobRequest(worker, payload, repeatCount);
-        EnqueResult enqueResult = queue.enqueue(jobRequest);
-        if (!isAsync && enqueResult.isSuccess()) {
+        JobRequest jobRequest = new JobRequest(worker, payload);
+        EnqueueResult enqueueResult = queue.enqueue(jobRequest);
+        if (!isAsync && enqueueResult.isSuccess()) {
             return Uni.createFrom().<JobResult>emitter(uniEmitter -> {
                 queue.addResponseEmitterForJob(jobRequest, uniEmitter);
             }).map(JSON::toJSONString);
         }
-        return Uni.createFrom().item(JSON.toJSONString(enqueResult));
+        return Uni.createFrom().item(JSON.toJSONString(enqueueResult));
     }
 }
