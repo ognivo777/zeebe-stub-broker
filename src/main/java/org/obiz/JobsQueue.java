@@ -61,7 +61,6 @@ public class JobsQueue {
         } finally {
             lock.unlock();
         }
-
     }
 
     /**

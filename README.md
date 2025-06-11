@@ -18,6 +18,16 @@ Built using [Quarkus](https://quarkus.io/performance/) for high performance and 
 * Optional synchronous mode to get immediate worker responses.
 * Provides real-time job submission status and queue info.
 
+# 🛠 Build Instructions
+To build the project, make sure you have **Java 21** installed. Then, clone the repository and build it using Gradle:
+```shell
+./gradlew qurkusBuild
+```
+The resulting uber JAR will be located at: 
+```shell
+./build/quarkus-build/gen
+```
+
 # 🚀 Usage
 
 ## Run broker stub
