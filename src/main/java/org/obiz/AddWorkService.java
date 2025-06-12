@@ -24,6 +24,7 @@ public class AddWorkService {
         JobRequest jobRequest = new JobRequest(worker, payload);
         EnqueueResult enqueueResult = queue.enqueue(jobRequest);
         if (!isAsync && enqueueResult.isSuccess()) {
+            //TODO expand EnqueueResult with optional worker result and always return EnqueueResult
             return Uni.createFrom().<JobResult>emitter(uniEmitter -> {
                 queue.addResponseEmitterForJob(jobRequest, uniEmitter);
             }).map(JSON::toJSONString);

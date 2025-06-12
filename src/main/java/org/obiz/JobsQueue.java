@@ -1,8 +1,7 @@
 package org.obiz;
 
 import io.quarkus.logging.Log;
-import io.smallrye.mutiny.Multi;
-import io.smallrye.mutiny.subscription.MultiEmitter;
+import io.smallrye.mutiny.Uni;
 import io.smallrye.mutiny.subscription.UniEmitter;
 import io.vertx.core.Vertx;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -17,36 +16,35 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 
 @ApplicationScoped
 public class JobsQueue {
 
-    private final Lock emitterLock = new ReentrantLock();
-    private final Lock lock = new ReentrantLock();
     private final int bufferSize = 500;
 
     @Inject
     Vertx vertx;
 
     // Named per worker in-memory job queues
-    private ConcurrentMap<String, BlockingQueue<JobRequest>> jobsStore = new ConcurrentHashMap<>();
-    // Named per worker emitters list
-    private final Map<String, ConcurrentLinkedQueue<MultiEmitter<? super JobRequest>>> emitters = new ConcurrentHashMap<>();//ToDo use UniEmitter
+    private final ConcurrentMap<String,WorkerContext> workers = new ConcurrentHashMap<>();
+
     private final Map<Long, UniEmitter<? super JobResult>> responseEmitters = new ConcurrentHashMap<>();
 
     public EnqueueResult enqueue(JobRequest jobRequest) {
-        BlockingQueue<JobRequest> queue = getQueue(jobRequest.getWorker());
-        lock.lock();
+        WorkerContext workerContext = getWorkerContext(jobRequest.getWorker());
+        BlockingQueue<JobRequest> queue = workerContext.getJobsQueue();
+        Lock workerLock = workerContext.getWorkerLock();
+        workerLock.lock();
         try {
-            var workerEmitters = emitters.get(jobRequest.getWorker());
+            var workerEmitters = workerContext.getEmittersForWaitingWorkers();
             if (workerEmitters!=null) {
-                emitterLock.lock(); //todo use per-emmiters / lock
+                Lock emitterLock = workerContext.getEmitterLock();
+                emitterLock.lock();
                 try {
-                    MultiEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
+                    UniEmitter<? super JobRequest> multiEmitter = workerEmitters.poll();
                     if (multiEmitter != null) {
-                        multiEmitter.emit(jobRequest);
+                        multiEmitter.complete(jobRequest);
                         return new EnqueueResult(true, false, queue.remainingCapacity(), jobRequest);
                     }
                 } finally {
@@ -59,17 +57,20 @@ public class JobsQueue {
                 return new EnqueueResult(false, false, queue.remainingCapacity(), jobRequest);
             }
         } finally {
-            lock.unlock();
+            workerLock.unlock();
         }
     }
 
     /**
      * Reactive job stream (up to maxCount or until timeout)
      */
-    public void jobStream(String worker, int maxCount, Duration timeout, Consumer<JobRequest> jobRequestConsumer, Runnable onFinish) {
-        lock.lock();
+    public void jobStream(String workerName, int maxCount, Duration timeout, Consumer<JobRequest> jobRequestConsumer, Runnable onFinish) {
+        WorkerContext workerContext = getWorkerContext(workerName);
+        BlockingQueue<JobRequest> queue = workerContext.getJobsQueue();
+        Lock workerLock = workerContext.getWorkerLock();
+
+        workerLock.lock();
         //Consume available requests in queue up to maxCount
-        var queue = getQueue(worker);
         AtomicInteger count = new AtomicInteger();
         do {
             var jobRequest = queue.poll();
@@ -81,24 +82,25 @@ public class JobsQueue {
 
         if (count.get() > 0) {
             onFinish.run();
-            lock.unlock();
+            workerLock.unlock();
         } else {
             AtomicLong timerId = new AtomicLong();
-            Multi.createFrom().<JobRequest>emitter(emitter -> {
-                        var multiEmitters = emitters.computeIfAbsent(worker, s -> new ConcurrentLinkedQueue<>());
-                        multiEmitters.add(emitter);
-                        lock.unlock();
+            Uni.createFrom().<JobRequest>emitter(emitter -> {
+                        ConcurrentLinkedQueue<UniEmitter<? super JobRequest>> jobEmitter = workerContext.getEmittersForWaitingWorkers();
+                        jobEmitter.add(emitter);
+                        workerLock.unlock();
                         timerId.set(vertx.setTimer(timeout.toMillis(), event -> {
+                            Lock emitterLock = workerContext.getEmitterLock();
                             emitterLock.lock(); //todo use per-emmiters lock
                             try {
-                                if(multiEmitters.remove(emitter))
+                                if(jobEmitter.remove(emitter))
                                     onFinish.run();
                             } finally {
                                 emitterLock.unlock();
                             }
                         }));
                     })
-                    .select().first()
+//                    .select().first()
 //                    .ifNoItem().after(timeout).fail()
                     .subscribe()
                     .with(jobRequest -> {
@@ -111,7 +113,7 @@ public class JobsQueue {
                                 jobRequestConsumer.accept(jobRequest);
                                 onFinish.run();
                             } catch (io.grpc.StatusRuntimeException e) {
-                                //worker disconnected
+                                //workerName disconnected
                                 enqueue(jobRequest);
                             }
                         }
@@ -123,8 +125,8 @@ public class JobsQueue {
         }
     }
 
-    private BlockingQueue<JobRequest> getQueue(String worker) {
-        return jobsStore.computeIfAbsent(worker, s -> new LinkedBlockingQueue<>(bufferSize));
+    private WorkerContext getWorkerContext(String worker) {
+        return workers.computeIfAbsent(worker, s -> new WorkerContext(bufferSize));
     }
 
     public void addResponseEmitterForJob(JobRequest jobRequest, UniEmitter<? super JobResult> uniEmitter) {
