@@ -28,4 +28,14 @@ public class EnqueueResult {
     public JobRequest getJobRequest() {
         return jobRequest;
     }
+
+    @Override
+    public String toString() {
+        return "EnqueueResult{" +
+                "success=" + success +
+                ", queued=" + queued +
+                ", spaceLeft=" + spaceLeft +
+                ", jobRequest=" + jobRequest +
+                '}';
+    }
 }

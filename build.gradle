@@ -10,7 +10,7 @@ repositories {
 
 dependencies {
     implementation enforcedPlatform("${quarkusPlatformGroupId}:${quarkusPlatformArtifactId}:${quarkusPlatformVersion}")
-    implementation 'com.alibaba:fastjson:2.0.28'
+//    implementation 'com.alibaba:fastjson:2.0.28'
     implementation 'io.camunda:zeebe-gateway-protocol-impl:8.5.18'
     implementation 'io.quarkus:quarkus-micrometer-registry-prometheus'
     implementation 'io.quarkus:quarkus-grpc'

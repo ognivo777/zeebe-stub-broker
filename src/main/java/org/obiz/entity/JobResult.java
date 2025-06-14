@@ -16,4 +16,12 @@ public class JobResult {
     public String getVariables() {
         return variables;
     }
+
+    @Override
+    public String toString() {
+        return "JobResult{" +
+                "jobKey=" + jobKey +
+                ", variables='" + variables + '\'' +
+                '}';
+    }
 }

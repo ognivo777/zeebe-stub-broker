@@ -1,6 +1,6 @@
 package org.obiz;
 
-import com.alibaba.fastjson2.JSON;
+//import com.alibaba.fastjson2.JSON;
 import io.smallrye.mutiny.Uni;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
@@ -27,8 +27,10 @@ public class AddWorkService {
             //TODO expand EnqueueResult with optional worker result and always return EnqueueResult
             return Uni.createFrom().<JobResult>emitter(uniEmitter -> {
                 jobsDispatcher.addResponseEmitterForJob(jobRequest, uniEmitter);
-            }).map(JSON::toJSONString);
+//            }).map(JSON::toJSONString);
+            }).map(JobResult::toString);
         }
-        return Uni.createFrom().item(JSON.toJSONString(enqueueResult));
+//        return Uni.createFrom().item(JSON.toJSONString(enqueueResult));
+        return Uni.createFrom().item(enqueueResult).map(EnqueueResult::toString);
     }
 }
