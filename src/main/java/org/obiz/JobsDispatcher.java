@@ -19,7 +19,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.function.Consumer;
 
 @ApplicationScoped
-public class JobsQueue {
+public class JobsDispatcher {
 
     private final int bufferSize = 500;
 
@@ -94,21 +94,25 @@ public class JobsQueue {
                             emitterLock.lock(); //todo use per-emmiters lock
                             try {
                                 if(jobEmitter.remove(emitter))
-                                    onFinish.run();
+                                    try {
+                                        //TODO count timed out workers
+                                        emitter.complete(null);
+                                        onFinish.run();
+                                    } catch (java.lang.IllegalStateException e) {
+                                        //worker leave, do nothing
+                                    }
                             } finally {
                                 emitterLock.unlock();
                             }
                         }));
                     })
-//                    .select().first()
-//                    .ifNoItem().after(timeout).fail()
                     .subscribe()
                     .with(jobRequest -> {
-                        vertx.cancelTimer(timerId.get());
                         if (jobRequest == null) {
-                            // TODO never should happen!
-                            System.out.println("Happened something wrong!");
+                            // Do nothing, worker timed out
                         } else {
+                            vertx.cancelTimer(timerId.get());
+                            //TODO count job consuming workers
                             try {
                                 jobRequestConsumer.accept(jobRequest);
                                 onFinish.run();

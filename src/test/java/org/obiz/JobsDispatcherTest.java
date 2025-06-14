@@ -2,16 +2,13 @@ package org.obiz;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.obiz.entity.JobRequest;
 
-import static org.junit.jupiter.api.Assertions.*;
+class JobsDispatcherTest {
 
-class JobsQueueTest {
-
-    private JobsQueue jobsQueue;
+    private JobsDispatcher jobsDispatcher;
     @BeforeEach
     void setUp() {
-        jobsQueue = new JobsQueue();
+        jobsDispatcher = new JobsDispatcher();
     }
 
     @Test

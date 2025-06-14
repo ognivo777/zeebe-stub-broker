@@ -13,20 +13,20 @@ import org.obiz.entity.JobResult;
 public class AddWorkService {
 
     @Inject
-    JobsQueue queue;
+    JobsDispatcher jobsDispatcher;
 
     @Path("{worker}")
     @PUT
-    @Produces(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.TEXT_HTML)
     public Uni<String> putPayload(
             @PathParam("worker") String worker,
             @QueryParam("async") @DefaultValue("true") boolean isAsync, String payload) {
         JobRequest jobRequest = new JobRequest(worker, payload);
-        EnqueueResult enqueueResult = queue.enqueue(jobRequest);
+        EnqueueResult enqueueResult = jobsDispatcher.enqueue(jobRequest);
         if (!isAsync && enqueueResult.isSuccess()) {
             //TODO expand EnqueueResult with optional worker result and always return EnqueueResult
             return Uni.createFrom().<JobResult>emitter(uniEmitter -> {
-                queue.addResponseEmitterForJob(jobRequest, uniEmitter);
+                jobsDispatcher.addResponseEmitterForJob(jobRequest, uniEmitter);
             }).map(JSON::toJSONString);
         }
         return Uni.createFrom().item(JSON.toJSONString(enqueueResult));

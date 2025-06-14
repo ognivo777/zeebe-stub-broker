@@ -18,7 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
 
     @Inject
-    JobsQueue queue;
+    JobsDispatcher queue;
 
     private final double ALPHA = 0.2;
     private final AtomicDouble rps = new AtomicDouble(0.0);
@@ -31,7 +31,6 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
     public void activateJobs(GatewayOuterClass.ActivateJobsRequest request, StreamObserver<GatewayOuterClass.ActivateJobsResponse> responseObserver) {
 
         String workerType = request.getType();
-        String worker = request.getWorker();
         int maxJobsToActivate = request.getMaxJobsToActivate();
         long requestTimeout = request.getRequestTimeout();
 //        System.out.printf("Job request workerType = %s (%s) (maxJobsToActivate: %s; requestTimeout: %d )%n", workerType, worker, maxJobsToActivate, requestTimeout);
@@ -61,6 +60,7 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
 
     @Override
     public void streamActivatedJobs(GatewayOuterClass.StreamActivatedJobsRequest request, StreamObserver<GatewayOuterClass.ActivatedJob> responseObserver) {
+        //same as activateJobs but without send "onComplete"
         super.streamActivatedJobs(request, responseObserver);
     }
 
@@ -78,11 +78,18 @@ public class ZeebeGatewayStub extends GatewayGrpc.GatewayImplBase {
 
     @Override
     public void throwError(GatewayOuterClass.ThrowErrorRequest request, StreamObserver<GatewayOuterClass.ThrowErrorResponse> responseObserver) {
-        super.throwError(request, responseObserver);
+        long jobKey = request.getJobKey();
+        String variables = request.getVariables();
+        String errorCode = request.getErrorCode();
+        String errorMessage = request.getErrorMessage();
+        queue.sendResponse(jobKey, variables);//Todo extend Job result to send errors
+        responseObserver.onNext(GatewayOuterClass.ThrowErrorResponse.newBuilder().build());
+        responseObserver.onCompleted();
     }
 
     @Override
     public void failJob(GatewayOuterClass.FailJobRequest request, StreamObserver<GatewayOuterClass.FailJobResponse> responseObserver) {
+        //Todo extend Job result to send job fails
         super.failJob(request, responseObserver);
     }
 
