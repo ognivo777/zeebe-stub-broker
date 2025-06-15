@@ -28,7 +28,7 @@ jobs:
           java --version
           native-image --version
       - name: Run gradlew build
-        run: ./gradlew quarkusBuild -Dquarkus.package.jar.enabled=false -Dquarkus.native.enabled=true
+        run: ./gradlew quarkusBuild -Dquarkus.package.jar.enabled=false -Dquarkus.native.enabled=true -Dquarkus.native.container-build=true -Dquarkus.native.container-runtime=docker
       - name: Extract Docker image metadata
         id: meta
         uses: docker/metadata-action@v5
