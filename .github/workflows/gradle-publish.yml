@@ -41,19 +41,11 @@ jobs:
         with:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: src/main/docker/Dockerfile.native
-          push: true
-          tags: latest
-          annotations: ${{ steps.meta.outputs.annotations }}
       - name: Build and push MICRO Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: src/main/docker/Dockerfile.native-micro
           push: true
-          tags: micro
+          tags: latest
           annotations: ${{ steps.meta.outputs.annotations }}
